@@ -45,6 +45,11 @@ export interface Report {
   provider: { name: string; model: string };
 }
 
+/** Synthesis token cap (QA S3 C1, 2026-10-27): same reasoning-token
+ * lesson as the judge cap — the 4000 cap survived a 2618-token
+ * completion with thin margin. Pinned at >= 8000 by the unit tests. */
+export const SYNTHESIS_MAX_TOKENS = 8000;
+
 export type Emit = (event: string, data: unknown) => void;
 
 function daysSince(iso: string | null): number | null {
@@ -170,7 +175,7 @@ export async function runResearch(query: string, llm: LLMClient, emit: Emit): Pr
 
   emit("progress", { stage: "synthesize", detail: "Writing the cited report…" });
   const sourceBlock = sources
-    .map((s) => `[${s.id}] (${s.kind}) ${s.title} — ${s.url}\nExcerpt: ${(s.excerpt ?? "no excerpt fetched").slice(0, 1000)}`)
+    .map((s) => `[${s.id}] (${s.kind}) ${s.title} — ${s.url}\nExcerpt: ${(s.excerpt ?? "no excerpt fetched").slice(0, 1000)}${s.grounded ? " [grounded summary — Meta's summary of this page, not a page quote]" : ""}`)
     .join("\n\n");
   const entityBlock = entities
     .map(
@@ -185,7 +190,7 @@ export async function runResearch(query: string, llm: LLMClient, emit: Emit): Pr
     const out = await llm.completeJSON<{ claims?: Array<{ text?: string; sourceIds?: string[] }>; verdict?: string }>(
       `You write a cited comparison report as JSON. Rules: every claim MUST cite at least one source id from the provided list, using only facts present in the excerpts — never invent numbers, features, or quotes. Phrase each claim close to the source wording so it can be quote-checked. If the sources do not support a point, omit it. The ranked winner determined by the data is "${winner}"${runnerUp ? ` and the runner-up is "${runnerUp}"` : ""} — write the verdict paragraph explaining the winner's lead and the runner-up's case. Return ONLY JSON: {"claims": [{"text": "...", "sourceIds": ["s1"]}], "verdict": "..."}.`,
       `Query: ${query}\n\nEntities:\n${entityBlock}\n\nSources:\n${sourceBlock || "(no sources fetched)"}`,
-      4000,
+      SYNTHESIS_MAX_TOKENS,
     );
     const validIds = new Set(sources.map((s) => s.id));
     claims = (out.claims ?? [])

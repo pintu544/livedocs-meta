@@ -40,11 +40,14 @@ function cleanTitle(title: string | undefined, url: string): string {
   return title.trim().slice(0, 200);
 }
 
-/** Parse a Responses API payload into citations + summary. Pure, tested. */
+/** Parse a Responses API payload into citations + summary. Pure, tested.
+ * NOTE (QA S3 m5): the summary preserves ALL message texts in order,
+ * not just the last one — multi-message Responses outputs used to
+ * lose earlier text. */
 export function parseGroundingResponse(data: unknown): GroundingResult {
   const output = (data as { output?: unknown })?.output;
   const items = Array.isArray(output) ? output : [];
-  let summary = "";
+  const summaryParts: string[] = [];
   const byUrl = new Map<string, GroundingHit>();
   for (const item of items) {
     const it = item as { type?: string; content?: unknown };
@@ -52,7 +55,8 @@ export function parseGroundingResponse(data: unknown): GroundingResult {
     for (const part of it.content) {
       const c = part as { type?: string; text?: string; annotations?: unknown };
       if (c.type !== "output_text" || typeof c.text !== "string") continue;
-      summary = c.text;
+      summaryParts.push(c.text);
+      const summary = summaryParts.join("\n");
       if (!Array.isArray(c.annotations)) continue;
       for (const a of c.annotations) {
         const an = a as { type?: string; url?: string; title?: string };
@@ -63,7 +67,7 @@ export function parseGroundingResponse(data: unknown): GroundingResult {
       }
     }
   }
-  return { summary, hits: [...byUrl.values()].slice(0, 5) };
+  return { summary: summaryParts.join("\n"), hits: [...byUrl.values()].slice(0, 5) };
 }
 
 export async function groundWithMeta(

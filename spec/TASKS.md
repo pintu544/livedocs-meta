@@ -81,7 +81,11 @@ against the Nov 4, 21:00 ET / Nov 5, 07:30 IST deadline).
 - [ ] T-7: Single-service Render deploy (new account), cold-start
       check, usage-log check.
       Done means: public URL serves the full flow cold in < 60s to
-      first byte; no key in the browser bundle (bundle grep clean).
+      first byte; no key in the browser bundle (bundle grep clean);
+      deploy env sets ALL THREE Meta vars (QA S3 M1 — the key alone
+      does NOT activate Meta): LLM_BASE_URL=https://api.meta.ai/v1,
+      LLM_MODEL=muse-spark-1.3, MODEL_API_KEY. Health with only the
+      key set reports provider none + an envWarning, not Meta.
 - [ ] T-8: Pintu-only: 2–3 min demo video (recorded warm), read live
       submission form, adapt checklist if fields differ from spec.
       Done means: video file ready + form fields confirmed.
@@ -96,14 +100,20 @@ against the Nov 4, 21:00 ET / Nov 5, 07:30 IST deadline).
 - [x] M-1: Env swap: backend runs with Meta base
       (https://api.meta.ai/v1) + model muse-spark-1.3 + Meta key (from
       Doppler muse/dev, MODEL_API_KEY — never pasted in chat).
-      Done means: /api/health shows provider meta + llmConfigured true.
+      Done means: /api/health shows provider meta + llmConfigured true
+      WITH ALL THREE env vars set (QA S3 M1 correction: MODEL_API_KEY
+      alone does NOT activate Meta — llmClientFromEnv defaults the
+      base to FastRouter and looks for LLM_API_KEY when LLM_BASE_URL /
+      LLM_MODEL are unset, so key-only health reports provider none
+      + llmConfigured false + an envWarning).
       DONE 2026-10-27: health → {"ok":true,"model":"muse-spark-1.3",
       "provider":"meta","llmConfigured":true,"metaConfigured":true}.
       Key home used: the Meta goal hidden_files/.env (mode 600,
       outside any repo), read transiently for local runs; Doppler
       muse/dev MODEL_API_KEY is still empty, so M-1 does NOT depend
       on Doppler — the env contract (MODEL_API_KEY name) is unchanged
-      for a later Doppler fill.
+      for a later Doppler fill, but that fill must ALSO set
+      LLM_BASE_URL + LLM_MODEL (see T-7).
 - [x] M-2: Grounding adapter swap: replace fetch-based grounding with
       Meta Responses API + web_search (the T-1 probe's verified shape).
       Done means: a report's sources include grounding citations, and
@@ -122,6 +132,18 @@ against the Nov 4, 21:00 ET / Nov 5, 07:30 IST deadline).
       plan split, 6 sources (2 web-grounded), 6 claims 6/6 verified,
       provider meta / muse-spark-1.3; unit checks 12/12; backend tsc
       clean; frontend vite build clean.
+      QA GATE S3 (2026-10-27 ~00:26 IST) VERDICT: NOT SAFE AS-IS —
+      judge cap 2000 exhausted by reasoning (0/7 verified on QA's
+      live run; builder's 6/6 not reproduced), MODEL_API_KEY-alone
+      env gap, circular grounded quote-match + "fetched source" copy.
+      FIX ROUND 2026-10-27 (this commit): judge + synthesis caps
+      raised to 8000 with unit pins; health warns on key-only env
+      and reports model null when unconfigured; grounded excerpts
+      disclosed in UI + DESIGN.md as Meta summaries (not page
+      quotes) and header copy corrected; report ID added to export;
+      facts-match excerpts fixed (no unrelated excerpt shown);
+      grounding preserves all message texts. Re-QA + Pintu browser
+      confirmation still open (parent steps) — Slice 3 NOT closed.
 
 ## Slice 2 note
 - Slice 2 (T-3/T-4 below) is built on the INTERIM provider (FastRouter

@@ -150,8 +150,9 @@ Meta's own pages and Pintu's own records count as verified.
   v5.105.0." cited to https://registry.npmjs.org/@tanstack%2Fquery-core/latest
   (real, current, grounded — not training data).
 - M-2 parse contract: collect url_citation annotations from ALL
-  message items' output_text (dedupe by URL), keep the final message
-  text as the grounding summary. Ignore reasoning items and
+  message items' output_text (dedupe by URL), keep ALL message
+  texts joined as the grounding summary (QA S3 m5: last-message-only
+  used to drop earlier text). Ignore reasoning items and
   intermediate chatter.
 - COST WARNING: one grounding call used 54,181 total tokens
   (input 52,187 incl. 24,364 cached; output 1,994 incl. 1,298
@@ -176,6 +177,19 @@ Meta's own pages and Pintu's own records count as verified.
   probe returned content null for exactly this reason. Production
   max_tokens must stay generous: synthesis 4,000 (existing),
   judge batch 2,000 minimum. Never cap a Meta call below ~1,000.
+- CORRECTION (QA S3 fix round, 2026-10-27): the 2,000 judge cap
+  above FAILED live — QA's "React Query vs SWR" run hit exactly
+  2,000 completion tokens with 1,998 reasoning, the JSON parse
+  failed, and 0/7 claims verified. Judge + synthesis caps are now
+  8,000 each (backend/src/verify.ts JUDGE_MAX_TOKENS,
+  backend/src/research.ts SYNTHESIS_MAX_TOKENS), pinned by unit
+  tests. Post-fix live re-run: 6 claims, 6/6 verified; judge call
+  used 1,991 completion tokens (1,727 reasoning) — inside 8,000
+  with margin, but still proof the 2,000 cap was flaky rather
+  than wrong-by-a-little (reasoning varies run to run; the
+  builder's earlier 6/6 and QA's 0/7 were different syntheses —
+  6 vs 7 claims — under the same marginal cap). Full-report cost
+  ≈ $0.04 (grounding ~11.6k tokens + synthesis/judge ~7k).
 - Node fetch through this VM's egress proxy requires
   NODE_USE_ENV_PROXY=1 (undici ignores proxy env otherwise).
   Production (Render) needs no proxy env.

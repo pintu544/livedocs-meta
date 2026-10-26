@@ -7,7 +7,7 @@ import {
   type ArchiveReport,
 } from "./archive";
 
-type Health = { ok: boolean; model: string; provider: string; llmConfigured: boolean; metaConfigured: boolean };
+type Health = { ok: boolean; model: string | null; provider: string; llmConfigured: boolean; metaConfigured: boolean; envWarning: string | null };
 type Source = { id: string; url: string; title: string; kind: string; excerpt: string | null; grounded?: boolean };
 type Entity = { name: string; repo: string | null; url: string | null; stars: number | null; lastRelease: string | null; healthScore: number; healthSignals: string[] };
 type Claim = { text: string; sourceIds: string[]; verdict?: "verified" | "needs-review"; excerpt?: string | null; reason?: string };
@@ -124,12 +124,20 @@ export default function App() {
     <main>
       <h1>LiveDocs Meta</h1>
       <p>
-        Citation-verified research reports. Every claim cites a fetched
-        source and carries a verification badge.
+        Citation-verified research reports. Every claim cites a source
+        and carries a verification badge. Sources marked [web-grounded]
+        carry Meta's grounded summary of the cited page, not a page
+        quote — verification against those sources checks the summary,
+        not the page text.
       </p>
 
       {health && !health.llmConfigured && (
         <p>Backend status: no LLM key configured — research is unavailable until a key is set.</p>
+      )}
+      {health && health.envWarning && (
+        <p>
+          <strong>Configuration warning:</strong> {health.envWarning}
+        </p>
       )}
       {health && health.provider === "meta" && (
         <p>
@@ -138,8 +146,8 @@ export default function App() {
       )}
       {health && health.provider === "fastrouter" && (
         <p>
-          <strong>Interim provider:</strong> FastRouter ({health.model}) —
-          migrating to Meta Muse Spark when billing clears.
+          Provider: FastRouter ({health.model}) — local comparison only;
+          the submission path runs on Meta Muse Spark.
         </p>
       )}
 
@@ -244,7 +252,11 @@ export default function App() {
 
           <h3>Claims</h3>
           <ul>
-            {report.claims.map((c, i) => (
+            {report.claims.map((c, i) => {
+              // QA S3 M2: a grounded claim's "excerpt" is Meta's
+              // summary of the page, not a page quote — label it so.
+              const claimGrounded = c.sourceIds.some((id) => sourceById.get(id)?.grounded);
+              return (
               <li key={i}>
                 <strong>
                   {c.verdict === "verified" ? "✓ Verified" : c.verdict === "needs-review" ? "Needs review" : "Unverified"}
@@ -267,12 +279,13 @@ export default function App() {
                 )}
                 {c.excerpt && (
                   <details>
-                    <summary>verifying excerpt</summary>
+                    <summary>{claimGrounded ? "verifying excerpt (grounded summary — not a page quote)" : "verifying excerpt"}</summary>
                     <p>{c.excerpt.slice(0, 600)}</p>
                   </details>
                 )}
               </li>
-            ))}
+              );
+            })}
           </ul>
 
           <h3>Sources</h3>
@@ -286,7 +299,7 @@ export default function App() {
                 {s.grounded && <> [web-grounded]</>}
                 {s.excerpt && (
                   <details>
-                    <summary>excerpt</summary>
+                    <summary>{s.grounded ? "grounded summary (Meta's summary of this page, not a page quote)" : "excerpt"}</summary>
                     <p>{s.excerpt.slice(0, 600)}</p>
                   </details>
                 )}

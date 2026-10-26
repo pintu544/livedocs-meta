@@ -9,9 +9,10 @@ TypeScript Express server that (a) serves `frontend/dist` in production,
 (b) runs the research pipeline, (c) proxies all Meta Model API calls so
 the key never leaves the server. Pipeline stages, in order: plan
 (entities) → ground (Meta Responses API + web_search, per entity) →
-enrich (GitHub REST, free, no key) → fetch (source pages, extract text)
-→ synthesize (Meta Chat Completions, structured JSON report) →
-verify (mechanical quote-match, then Muse Spark judge) → render.
+enrich (GitHub REST, free, no key) → synthesize (Meta Chat
+Completions, structured JSON report) → verify (mechanical quote-match,
+then Muse Spark judge) → render. (The Slice 2 fetch stage — direct
+source-page fetches — was deleted in M-2; nothing is fetched anymore.)
 Progress streams over SSE; the final report is one JSON object the
 frontend renders. Deterministic ranking (adoption + health) is computed
 in code; the LLM only writes wording and verdicts.
@@ -29,7 +30,10 @@ in code; the LLM only writes wording and verdicts.
   rendered as Markdown on export (client-side).
 
 ## API Contracts
-- GET /api/health → { ok, model, metaConfigured } (metaConfigured is
+- GET /api/health → { ok, model (null when no provider is
+  configured), provider, llmConfigured, metaConfigured,
+  envWarning (null, or a warning when MODEL_API_KEY is set but the
+  active provider is not Meta — QA S3 M1) } (metaConfigured is
   boolean only — never leaks key presence details beyond that).
 - POST /api/research { query } → SSE stream, events:
   { type: "plan", entities[] } → { type: "source", source } →
@@ -43,6 +47,40 @@ in code; the LLM only writes wording and verdicts.
 - All Meta calls use base https://api.meta.ai/v1, Bearer MODEL_API_KEY,
   model muse-spark-1.3. Synthesis requests cap max_tokens; every call
   logs model + input/output token counts server-side (no content logged).
+  Token caps (QA S3 C1, 2026-10-27): judge + synthesis caps are 8000
+  — Muse Spark spends most of its completion budget on reasoning, and
+  a 2000 judge cap truncated the JSON answer (0/7 verified on QA's
+  live run). Caps are pinned by unit tests; never cut them without a
+  live multi-claim judge re-run.
+- Env contract (QA S3 M1, 2026-10-27): Meta activation requires ALL
+  THREE vars — LLM_BASE_URL=https://api.meta.ai/v1,
+  LLM_MODEL=muse-spark-1.3, MODEL_API_KEY. MODEL_API_KEY alone does
+  NOT activate Meta (the client defaults to the FastRouter base when
+  the base/model vars are unset). Health reports provider none +
+  envWarning in that state; the T-7 deploy checklist requires the
+  triple.
+
+## Known limitation — grounded excerpts are summaries, not page quotes (QA S3 M2, 2026-10-27)
+- Meta Responses web_search returns url_citations (real: the model did
+  browse those URLs) but the "excerpt" attached to a grounded source
+  is the model's own summary text from the Responses output — it is
+  NOT text copied from the cited page (annotation indices point into
+  model output, not page text, so no page quote can be recovered
+  from them).
+- Consequence for T-5: mechanical quote-match on a grounded claim
+  checks the claim's words against Meta's summary, not the page.
+  A "Verified" badge on a grounded claim therefore means "the claim
+  agrees with Meta's grounded summary of the cited page", which is
+  weaker than "the claim appears on the cited page". GitHub-source
+  claims are genuinely checked against API data (descriptions,
+  release bodies), so the weakness is specific to grounded sources.
+- Disclosure (the honest fix — no faked page quotes): the UI labels
+  grounded excerpts as grounded summaries wherever they are shown
+  (claim details, source details, Markdown export), the header no
+  longer says "fetched source" (nothing is fetched post-M-2), and
+  this section documents the semantics. Judges reading a report
+  should treat grounded Verified badges as summary-agreement, and
+  GitHub Verified badges as data-checked.
 
 ## Key Decisions
 - Decision: Muse Spark 1.3 Standard via Meta Model API — Rationale: it

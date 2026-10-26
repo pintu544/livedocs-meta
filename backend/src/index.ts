@@ -12,12 +12,14 @@ app.use(cors());
 app.use(express.json());
 
 const PORT = Number(process.env.PORT ?? 4000);
-const META_MODEL_ID = process.env.MODEL_ID ?? "muse-spark-1.3";
 
 app.get("/api/health", (_req, res) => {
   let llmConfigured = false;
   let provider = "none";
-  let model = META_MODEL_ID;
+  // QA S3 m1: report a model only when a provider is actually
+  // configured — otherwise the default id misleads (it used to
+  // report muse-spark-1.3 alongside provider "none").
+  let model: string | null = null;
   try {
     const llm = llmClientFromEnv();
     llmConfigured = true;
@@ -26,13 +28,22 @@ app.get("/api/health", (_req, res) => {
   } catch {
     // No LLM key configured — health still reports, honestly.
   }
+  const metaKeySet = Boolean(process.env.MODEL_API_KEY);
+  // QA S3 M1: MODEL_API_KEY alone does NOT activate Meta — the app
+  // also needs LLM_BASE_URL + LLM_MODEL. Warn instead of silently
+  // reporting provider "none", which a deployer could misread.
+  const envWarning =
+    metaKeySet && provider !== "meta"
+      ? "MODEL_API_KEY is set but the active provider is not Meta — Meta requires LLM_BASE_URL=https://api.meta.ai/v1 and LLM_MODEL=muse-spark-1.3 in addition to the key."
+      : null;
   res.json({
     ok: true,
     model,
     provider,
     llmConfigured,
     // Boolean only — never leaks key details beyond configured/not-configured.
-    metaConfigured: Boolean(process.env.MODEL_API_KEY),
+    metaConfigured: metaKeySet,
+    envWarning,
   });
 });
 

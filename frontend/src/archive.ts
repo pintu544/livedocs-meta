@@ -52,6 +52,7 @@ export function buildMarkdown(report: ArchiveReport): string {
   lines.push(`# LiveDocs evidence archive`);
   lines.push(``);
   lines.push(`- Query: ${report.query}`);
+  lines.push(`- Report ID: ${report.id}`);
   if (report.createdAt) lines.push(`- Generated: ${report.createdAt}`);
   lines.push(`- Provider: ${report.provider.name} / ${report.provider.model}`);
   lines.push(`- Method: ${report.method}`);
@@ -71,9 +72,10 @@ export function buildMarkdown(report: ArchiveReport): string {
   const byId = new Map(report.sources.map((s) => [s.id, s]));
   report.claims.forEach((c, i) => {
     const badge = c.verdict === "verified" ? "Verified" : c.verdict === "needs-review" ? "Needs review" : "Unverified";
+    const claimGrounded = c.sourceIds.some((id) => byId.get(id)?.grounded);
     lines.push(`${i + 1}. [${badge}] ${c.text}`);
     if (c.reason) lines.push(`   Reason: ${c.reason}`);
-    if (c.excerpt) lines.push(`   Excerpt: ${c.excerpt.slice(0, 500)}`);
+    if (c.excerpt) lines.push(`   ${claimGrounded ? "Grounded summary (Meta's summary of the cited page, not a page quote)" : "Excerpt"}: ${c.excerpt.slice(0, 500)}`);
     for (const id of c.sourceIds) {
       const s = byId.get(id);
       if (s) lines.push(`   [${id}] ${s.title} — ${s.url}`);
@@ -83,7 +85,7 @@ export function buildMarkdown(report: ArchiveReport): string {
   lines.push(`## Sources`);
   for (const s of report.sources) {
     lines.push(`- [${s.id}] (${s.kind}) ${s.title} — ${s.url}${s.grounded ? " [web-grounded]" : ""}`);
-    if (s.excerpt) lines.push(`  Excerpt: ${s.excerpt.slice(0, 1000)}`);
+    if (s.excerpt) lines.push(`  ${s.grounded ? "Grounded summary (Meta's summary of this page, not a page quote)" : "Excerpt"}: ${s.excerpt.slice(0, 1000)}`);
   }
   return lines.join("\n") + "\n";
 }

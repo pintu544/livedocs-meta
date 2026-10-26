@@ -10,14 +10,28 @@ import {
   numbersIn,
   mechanicalCheck,
   composeVerdict,
+  judgeClaims,
+  verifyClaims,
+  JUDGE_MAX_TOKENS,
 } from "./verify.js";
+import { SYNTHESIS_MAX_TOKENS } from "./research.js";
 import { parseGroundingResponse } from "./grounding.js";
 
 let passed = 0;
-function check(name: string, fn: () => void) {
-  fn();
-  passed++;
-  console.log(`ok - ${name}`);
+const pending: Promise<void>[] = [];
+function check(name: string, fn: () => unknown) {
+  const r = fn();
+  if (r instanceof Promise) {
+    pending.push(
+      r.then(() => {
+        passed++;
+        console.log(`ok - ${name}`);
+      }),
+    );
+  } else {
+    passed++;
+    console.log(`ok - ${name}`);
+  }
 }
 
 // normalize
@@ -148,4 +162,98 @@ check("parseGroundingResponse falls back to domain for a punctuation-only title"
   assert.equal(r.hits[0].title, "swr.vercel.app");
 });
 
+// QA S3 C1 regression: caps must stay far above reasoning usage.
+check("judge + synthesis caps are >= 8000 (QA S3 C1)", () => {
+  assert.ok(JUDGE_MAX_TOKENS >= 8000, `judge cap ${JUDGE_MAX_TOKENS}`);
+  assert.ok(SYNTHESIS_MAX_TOKENS >= 8000, `synthesis cap ${SYNTHESIS_MAX_TOKENS}`);
+});
+
+// QA S3 m4: facts match has no single verifying excerpt.
+check("mechanicalCheck facts match returns no excerpt (QA S3 m4)", () => {
+  const m = mechanicalCheck(
+    "TanStack/query has 50482 stars on GitHub",
+    ["TanStack/query (GitHub)"],
+    "TanStack/query stars 50482 health 90",
+  );
+  assert.equal(m.matched, true);
+  assert.equal(m.excerpt, null);
+});
+
+// QA S3 m5: multi-message grounding preserves all message text.
+check("parseGroundingResponse preserves all message texts (QA S3 m5)", () => {
+  const r = parseGroundingResponse({
+    output: [
+      { type: "message", content: [{ type: "output_text", text: "First part.", annotations: [] }] },
+      {
+        type: "message",
+        content: [
+          {
+            type: "output_text",
+            text: "Second part.",
+            annotations: [{ type: "url_citation", url: "https://example.com/", title: "Ex" }],
+          },
+        ],
+      },
+    ],
+  });
+  assert.match(r.summary, /First part\./);
+  assert.match(r.summary, /Second part\./);
+  assert.equal(r.hits.length, 1);
+});
+
+// QA S3 C1 regression: judge path over a multi-claim input via a stub
+// LLM (no network). Proves the batched judge mapping works; the cap
+// pin above guards the truncation failure mode.
+check("judgeClaims maps a multi-claim batch via stub LLM", async () => {
+  const stub = {
+    provider: "test",
+    model: "test",
+    completeJSON: async () => ({
+      verdicts: [
+        { index: 0, supported: true, reason: "stated" },
+        { index: 1, supported: false, reason: "not stated" },
+        { index: 2, supported: true, reason: "stated" },
+      ],
+    }),
+    ground: async () => {
+      throw new Error("unused");
+    },
+  };
+  const map = await judgeClaims(
+    stub as never,
+    [
+      { text: "c0", sourceIds: ["s1"] },
+      { text: "c1", sourceIds: ["s1"] },
+      { text: "c2", sourceIds: ["s1"] },
+    ],
+    [{ id: "s1", excerpt: "some excerpt text here" }],
+  );
+  assert.ok(map !== null);
+  assert.equal(map.get(0)?.supported, true);
+  assert.equal(map.get(1)?.supported, false);
+  assert.equal(map.get(2)?.supported, true);
+});
+
+// QA S3 m4 end-to-end: a facts-verified claim must NOT display an
+// unrelated excerpt as evidence.
+check("verifyClaims facts-verified claim has null excerpt (QA S3 m4)", async () => {
+  const stub = {
+    provider: "test",
+    model: "test",
+    completeJSON: async () => ({ verdicts: [{ index: 0, supported: true, reason: "figures match" }] }),
+    ground: async () => {
+      throw new Error("unused");
+    },
+  };
+  const out = await verifyClaims(
+    stub as never,
+    [{ text: "TanStack/query has 50482 stars on GitHub", sourceIds: ["s1"] }],
+    [{ id: "s1", excerpt: "TanStack/query (GitHub)" }],
+    "TanStack/query stars 50482 health 90",
+  );
+  assert.equal(out[0].verdict, "verified");
+  assert.equal(out[0].excerpt, null);
+});
+
+await Promise.all(pending);
 console.log(`\n${passed} unit checks passed`);

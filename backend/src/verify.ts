@@ -105,19 +105,32 @@ export function mechanicalCheck(
   }
   const nums = numbersIn(claim);
   if (nums.length > 0) {
-    const corpus = [...excerpts, factsText].join("\n");
-    const corpusNums = new Set(numbersIn(corpus));
+    const corpusNums = new Set(numbersIn([...excerpts, factsText].join("\n")));
     if (nums.every((n) => corpusNums.has(n))) {
+      // A single excerpt is evidence ONLY if it contains every
+      // figure itself (QA S3 m4): an excerpt that merely shares
+      // words with the claim must never be displayed as if it
+      // proved the figures.
       for (const ex of excerpts) {
+        const exNums = new Set(numbersIn(ex));
         const shared = contentWords(claim).filter((w) => words(ex).includes(w));
-        if (shared.length >= 2) {
+        if (nums.every((n) => exNums.has(n)) && shared.length >= 2) {
           return { matched: true, excerpt: ex, reason: "Claim figures match cited source" };
         }
       }
       if (factsText) {
+        const factsNums = new Set(numbersIn(factsText));
         const shared = contentWords(claim).filter((w) => words(factsText).includes(w));
+        if (nums.every((n) => factsNums.has(n)) && shared.length >= 2) {
+          return { matched: true, excerpt: null, reason: "Claim figures match repository data" };
+        }
+      }
+      // Figures spread across excerpts: the claim matches, but no
+      // single excerpt is evidence — show none rather than mislead.
+      for (const ex of excerpts) {
+        const shared = contentWords(claim).filter((w) => words(ex).includes(w));
         if (shared.length >= 2) {
-          return { matched: true, excerpt: excerpts[0] ?? null, reason: "Claim figures match repository data" };
+          return { matched: true, excerpt: null, reason: "Claim figures match cited sources combined" };
         }
       }
     }
@@ -149,6 +162,14 @@ export function composeVerdict(
   }
   return { verdict: "needs-review", excerpt: mechanical.excerpt, reason: `Judge did not support this claim${judgeReason ? `: ${judgeReason}` : ""}` };
 }
+
+/** Token cap (QA S3 C1, 2026-10-27): Muse Spark spends most of its
+ * completion budget on reasoning (QA observed 1998/2000 reasoning
+ * tokens on a judge call, which truncated the JSON answer and made
+ * every claim needs-review). The cap must stay far above reasoning
+ * usage; the unit tests pin it at >= 8000 so a future cut re-breaks
+ * verification loudly instead of silently. */
+export const JUDGE_MAX_TOKENS = 8000;
 
 interface JudgeVerdict {
   index?: number;
@@ -182,7 +203,7 @@ export async function judgeClaims(
     const out = await llm.completeJSON<{ verdicts?: JudgeVerdict[] }>(
       `You judge whether each claim is supported by its cited excerpts. A claim is supported ONLY if the excerpts state it or directly imply it — never use outside knowledge. Return ONLY JSON: {"verdicts": [{"index": 0, "supported": true, "reason": "..."}]} with one verdict per claim index, in order.`,
       block,
-      2000,
+      JUDGE_MAX_TOKENS,
     );
     const map = new Map<number, { supported: boolean; reason: string }>();
     for (const v of out.verdicts ?? []) {
@@ -214,9 +235,13 @@ export async function verifyClaims(
     const mechanical = mechanicalCheck(c.text, excerpts, factsText);
     const j = judge?.get(i) ?? null;
     const v = composeVerdict(mechanical, j ? j.supported : null, j?.reason);
-    // Show the closest cited excerpt when nothing matched, so the
-    // reviewer can see what was checked.
-    if (!v.excerpt && excerpts.length > 0) v.excerpt = excerpts[0];
+    // Show the closest cited excerpt when a claim is left on
+    // needs-review, so the reviewer can see what was checked. Never
+    // substitute an excerpt for a verified claim whose evidence is
+    // repository data (QA S3 m4): a verified facts match has no
+    // single verifying excerpt, and displaying excerpts[0] would
+    // present unrelated text as evidence.
+    if (!v.excerpt && v.verdict !== "verified" && excerpts.length > 0) v.excerpt = excerpts[0];
     return v;
   });
 }
