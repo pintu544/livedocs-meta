@@ -12,11 +12,18 @@ against the Nov 4, 21:00 ET / Nov 5, 07:30 IST deadline).
       Model API key at dev.meta.ai, confirm credits/Discord state.
       Done means: Pintu confirms key created (value never shared in
       chat) + rules accepted. Unblocks: T-1.
-- [ ] T-1: Throwaway probe (DELETED after): one Responses call with
+- [x] T-1: Throwaway probe (DELETED after): one Responses call with
       web_search + one Chat Completions structured-JSON call, log the
       exact citation/response shapes.
       Done means: probe output shows cited sources + valid JSON, shapes
       recorded in research.md; probe files deleted. Unblocks: T-3, T-4.
+      DONE 2026-10-27 on the REAL key (billing resolved): Responses
+      web_search returned url_citation annotations + a grounded
+      answer (TanStack Query v5.105.0 via npm registry); Chat
+      Completions returned valid structured JSON (3 claims + verdict).
+      Shapes + cost + reasoning-token lesson in spec/research.md.
+      Probe file deleted. (First attempt 2026-10-26 was
+      billing-blocked and is superseded.)
 - [x] T-2: Repo scaffold: fresh public repo, TS Express backend +
       React/Vite frontend, /api/health, env contract, README, no
       secrets committed.
@@ -50,14 +57,23 @@ against the Nov 4, 21:00 ET / Nov 5, 07:30 IST deadline).
       closed 09:40 IST.
 
 ## Slice 3 — Verification + evidence archive (Nov 1–2)
-- [ ] T-5: Verify: mechanical quote-match + Muse Spark judge → badges
+- [x] T-5: Verify: mechanical quote-match + Muse Spark judge → badges
       (Verified / Needs review) with excerpt + reason per claim.
       Done means: a deliberately stale claim shows Needs review with a
       reason; a true quote shows Verified. Unblocks: T-6.
-- [ ] T-6: Archive + history: Markdown evidence export + localStorage
+      DONE 2026-10-27 on Meta (backend/src/verify.ts, batched judge):
+      /api/verify stale claim ("SWR has 99999999 stars") →
+      needs-review with contradiction reason; verbatim quote →
+      verified; no-excerpt → needs-review. Live "React Query vs SWR"
+      report: 6/6 claims verified. QA gate S3 still open (parent).
+- [x] T-6: Archive + history: Markdown evidence export + localStorage
       history reload.
       Done means: exported file contains query, claims, sources with
       excerpts, verdicts; a reloaded report matches the original.
+      DONE 2026-10-27 (frontend/src/archive.ts): Markdown export
+      verified against the real M-3 report (101 lines, all required
+      sections incl. web-grounded markers); history round-trip
+      JSON-identical. QA gate S3 still open (parent).
 - [ ] QA gate S3: adversarial QA subagent on Slice 3 + Pintu browser
       confirmation before Slice 4.
 
@@ -77,18 +93,35 @@ against the Nov 4, 21:00 ET / Nov 5, 07:30 IST deadline).
       review (projected score vs bar + clarity check) before T-9 files.
 
 ## Migration — when the Meta key activates (any time after billing clears)
-- [ ] M-1: Env swap: backend runs with Meta base
+- [x] M-1: Env swap: backend runs with Meta base
       (https://api.meta.ai/v1) + model muse-spark-1.3 + Meta key (from
       Doppler muse/dev, MODEL_API_KEY — never pasted in chat).
       Done means: /api/health shows provider meta + llmConfigured true.
-- [ ] M-2: Grounding adapter swap: replace fetch-based grounding with
+      DONE 2026-10-27: health → {"ok":true,"model":"muse-spark-1.3",
+      "provider":"meta","llmConfigured":true,"metaConfigured":true}.
+      Key home used: the Meta goal hidden_files/.env (mode 600,
+      outside any repo), read transiently for local runs; Doppler
+      muse/dev MODEL_API_KEY is still empty, so M-1 does NOT depend
+      on Doppler — the env contract (MODEL_API_KEY name) is unchanged
+      for a later Doppler fill.
+- [x] M-2: Grounding adapter swap: replace fetch-based grounding with
       Meta Responses API + web_search (the T-1 probe's verified shape).
       Done means: a report's sources include grounding citations, and
       the interim fetch adapter is deleted, not left as fallback.
+      DONE 2026-10-27 (backend/src/grounding.ts): live "React Query
+      vs SWR" report carries web-grounded citations (TanStack Query
+      docs, SWR docs); backend/src/fetching.ts DELETED; the UI
+      "Interim provider" note is replaced by a Meta provider label.
 - [ ] M-3: Full re-verification: re-run T-3/T-4/T-5/T-6 live against
       Meta + adversarial QA pass + Pintu browser confirmation.
       Done means: every slice acceptance passes on Meta, and the
       submission runs 100% on Meta tooling. Unblocks: T-7 deploy.
+      LIVE RE-RUN DONE 2026-10-27 (evidence below); adversarial QA
+      pass + Pintu browser confirmation still open (parent steps).
+      Live evidence: "React Query vs SWR" end to end on Meta —
+      plan split, 6 sources (2 web-grounded), 6 claims 6/6 verified,
+      provider meta / muse-spark-1.3; unit checks 12/12; backend tsc
+      clean; frontend vite build clean.
 
 ## Slice 2 note
 - Slice 2 (T-3/T-4 below) is built on the INTERIM provider (FastRouter

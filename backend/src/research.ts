@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { LLMClient } from "./llm.js";
 import { planEntities } from "./plan.js";
 import { enrichFromGitHub, type RepoStats } from "./github.js";
-import { fetchPageText } from "./fetching.js";
+import { verifyClaims } from "./verify.js";
 
 export interface Source {
   id: string;
@@ -10,6 +10,8 @@ export interface Source {
   title: string;
   kind: "Repo" | "Docs" | "Release" | "Page";
   excerpt: string | null;
+  /** True when this source came from Meta Responses web_search (M-2). */
+  grounded?: boolean;
 }
 
 export interface Entity {
@@ -25,6 +27,10 @@ export interface Entity {
 export interface Claim {
   text: string;
   sourceIds: string[];
+  /** Slice 3 (T-5): verification badge, excerpt, and reason. */
+  verdict?: "verified" | "needs-review";
+  excerpt?: string | null;
+  reason?: string;
 }
 
 export interface Report {
@@ -64,13 +70,14 @@ export function healthScore(stats: RepoStats): { score: number; signals: string[
 }
 
 /**
- * INTERIM grounding adapter (fetch-based). Migration M-2 swaps this for
- * Meta Responses API + web_search, which returns citations natively.
- * The rest of the pipeline (plan → enrich → synthesize → report) is
- * unchanged by the swap.
+ * Grounding (M-2): GitHub stats + Meta Responses web_search citations.
+ * There is NO fetch fallback: if grounding fails, the report keeps its
+ * GitHub sources and notes the gap (FR-8 honest degradation). The
+ * Slice 2 interim fetch adapter (README/homepage fetches) is deleted.
  */
 async function groundEntity(
   entity: string,
+  llm: LLMClient,
   emit: Emit,
   addSource: (s: Omit<Source, "id">) => Source | null,
 ): Promise<RepoStats | null> {
@@ -89,17 +96,6 @@ async function groundEntity(
     .join(" · ");
   addSource({ url: stats.htmlUrl, title: `${stats.fullName} (GitHub)`, kind: "Repo", excerpt: repoExcerpt || null });
 
-  const readme = await fetchPageText(
-    `https://raw.githubusercontent.com/${stats.fullName}/${stats.defaultBranch}/README.md`,
-    6000,
-  );
-  if (readme) addSource({ url: stats.htmlUrl, title: `${stats.fullName} README`, kind: "Docs", excerpt: readme.slice(0, 1500) });
-
-  if (stats.homepage && !stats.homepage.includes("github.com")) {
-    const home = await fetchPageText(stats.homepage, 6000);
-    if (home) addSource({ url: stats.homepage, title: `${entity} homepage`, kind: "Page", excerpt: home.slice(0, 1500) });
-  }
-
   if (stats.latestRelease) {
     const body = stats.latestRelease.body ? stats.latestRelease.body.slice(0, 1000) : "";
     addSource({
@@ -107,6 +103,19 @@ async function groundEntity(
       title: `${stats.fullName} ${stats.latestRelease.tag}`,
       kind: "Release",
       excerpt: body || `Release ${stats.latestRelease.tag}`,
+    });
+  }
+
+  try {
+    const grounded = await llm.ground(entity);
+    emit("progress", { stage: "research", detail: `Grounded ${entity}: ${grounded.hits.length} web citations.` });
+    for (const hit of grounded.hits) {
+      addSource({ url: hit.url, title: hit.title, kind: "Page", excerpt: grounded.summary || hit.snippet, grounded: true });
+    }
+  } catch (err) {
+    emit("progress", {
+      stage: "research",
+      detail: `Web grounding failed for ${entity} (${err instanceof Error ? err.message : "unknown"}); continuing with GitHub sources only.`,
     });
   }
   return stats;
@@ -129,7 +138,7 @@ export async function runResearch(query: string, llm: LLMClient, emit: Emit): Pr
   const entities: Entity[] = [];
   for (const name of plan.entities) {
     emit("progress", { stage: "research", detail: `Researching ${name}…` });
-    const stats = await groundEntity(name, emit, addSource);
+    const stats = await groundEntity(name, llm, emit, addSource);
     if (stats) {
       const health = healthScore(stats);
       entities.push({
@@ -174,7 +183,7 @@ export async function runResearch(query: string, llm: LLMClient, emit: Emit): Pr
   let verdictText = "";
   try {
     const out = await llm.completeJSON<{ claims?: Array<{ text?: string; sourceIds?: string[] }>; verdict?: string }>(
-      `You write a cited comparison report as JSON. Rules: every claim MUST cite at least one source id from the provided list, using only facts present in the excerpts — never invent numbers, features, or quotes. If the sources do not support a point, omit it. The ranked winner determined by the data is "${winner}"${runnerUp ? ` and the runner-up is "${runnerUp}"` : ""} — write the verdict paragraph explaining the winner's lead and the runner-up's case. Return ONLY JSON: {"claims": [{"text": "...", "sourceIds": ["s1"]}], "verdict": "..."}.`,
+      `You write a cited comparison report as JSON. Rules: every claim MUST cite at least one source id from the provided list, using only facts present in the excerpts — never invent numbers, features, or quotes. Phrase each claim close to the source wording so it can be quote-checked. If the sources do not support a point, omit it. The ranked winner determined by the data is "${winner}"${runnerUp ? ` and the runner-up is "${runnerUp}"` : ""} — write the verdict paragraph explaining the winner's lead and the runner-up's case. Return ONLY JSON: {"claims": [{"text": "...", "sourceIds": ["s1"]}], "verdict": "..."}.`,
       `Query: ${query}\n\nEntities:\n${entityBlock}\n\nSources:\n${sourceBlock || "(no sources fetched)"}`,
       4000,
     );
@@ -200,6 +209,23 @@ export async function runResearch(query: string, llm: LLMClient, emit: Emit): Pr
     verdictText = verdictText || `${winner} leads on the combined adoption + maintenance-health ranking.`;
   }
   if (!verdictText) verdictText = `${winner} leads on the combined adoption + maintenance-health ranking.`;
+
+  // Slice 3 (T-5): verify every claim — mechanical quote-match + Muse
+  // Spark judge. Verification never fails the report: on judge failure
+  // every claim lands on needs-review with a reason (FR-8).
+  emit("progress", { stage: "verify", detail: `Verifying ${claims.length} claims…` });
+  try {
+    const factsText = entities
+      .map((e) => `${e.name} ${e.repo ?? ""} stars ${e.stars ?? ""} last release ${e.lastRelease ?? ""}`)
+      .join("\n");
+    const verdicts = await verifyClaims(llm, claims, sources, factsText);
+    claims = claims.map((c, i) => ({ ...c, ...verdicts[i] }));
+    const verifiedCount = verdicts.filter((v) => v.verdict === "verified").length;
+    emit("progress", { stage: "verify", detail: `${verifiedCount}/${claims.length} claims verified.` });
+  } catch (err) {
+    emit("progress", { stage: "verify", detail: `Verification unavailable (${err instanceof Error ? err.message : "unknown"}); claims marked needs-review.` });
+    claims = claims.map((c) => ({ ...c, verdict: "needs-review" as const, reason: "Verification unavailable" }));
+  }
 
   const report: Report = {
     id: randomUUID(),

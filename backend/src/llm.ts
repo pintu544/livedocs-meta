@@ -1,10 +1,13 @@
 /**
  * Provider-agnostic OpenAI-compatible chat client.
  *
- * Interim: FastRouter (base https://api.fastrouter.ai/api/v1, model
- * openai/gpt-5.2). Migration (M-1): Meta Model API (base
- * https://api.meta.ai/v1, model muse-spark-1.3) plugs into this SAME
- * client via env — only the grounding adapter changes (M-2).
+ * Live provider (M-1, 2026-10-27): Meta Model API (base
+ * https://api.meta.ai/v1, model muse-spark-1.3, key MODEL_API_KEY).
+ * The Slice 2 interim provider (FastRouter, base
+ * https://api.fastrouter.ai/api/v1, model openai/gpt-5.2, key
+ * LLM_API_KEY) still plugs in via env for local comparison, but the
+ * submission path is Meta-only. Grounding (M-2) is Meta Responses
+ * web_search and refuses non-Meta bases — there is no fetch fallback.
  *
  * The key comes from env at boot, is never logged, and usage (model +
  * token counts + cost when reported) is logged without content.
@@ -24,6 +27,8 @@ export interface LLMClient {
   readonly provider: string;
   readonly model: string;
   completeJSON<T>(system: string, user: string, maxTokens?: number): Promise<T>;
+  /** Meta Responses web_search grounding. Throws on non-Meta bases. */
+  ground(entity: string): Promise<import("./grounding.js").GroundingResult>;
 }
 
 export class OpenAICompatibleLLM implements LLMClient {
@@ -34,6 +39,14 @@ export class OpenAICompatibleLLM implements LLMClient {
     private apiKey: string,
   ) {
     if (!apiKey) throw new LLMError("LLM API key is required");
+  }
+
+  async ground(entity: string): Promise<import("./grounding.js").GroundingResult> {
+    if (!this.baseUrl.includes("meta.ai")) {
+      throw new LLMError("Meta grounding requires a Meta base URL");
+    }
+    const { groundWithMeta } = await import("./grounding.js");
+    return groundWithMeta(this.baseUrl, this.apiKey, this.model, entity);
   }
 
   async completeJSON<T>(system: string, user: string, maxTokens = 4000): Promise<T> {

@@ -66,12 +66,37 @@ app.post("/api/research", async (req, res) => {
   }
 });
 
-// Slice 3: citation verification + evidence archive.
-app.post("/api/verify", (_req, res) => {
-  res.status(501).json({
-    ok: false,
-    error: "Citation verification arrives in Slice 3 (see spec/TASKS.md).",
-  });
+// Slice 3 (T-5): single-claim verification, same two-stage check as
+// the pipeline. Body: { claim, sourceUrl?, excerpt? }. The URL is a
+// reference only — the check runs against the supplied excerpt text
+// (no page fetch: the fetch adapter was deleted in M-2). Without an
+// excerpt, mechanical match cannot run, so the verdict is
+// needs-review with a reason. Provider error bodies are never echoed.
+app.post("/api/verify", async (req, res) => {
+  const claim = typeof req.body?.claim === "string" ? req.body.claim.trim() : "";
+  const sourceUrl = typeof req.body?.sourceUrl === "string" ? req.body.sourceUrl : null;
+  const excerpt = typeof req.body?.excerpt === "string" ? req.body.excerpt : null;
+  if (!claim || claim.length > 2000) {
+    res.status(400).json({ ok: false, error: "Claim must be 1–2000 characters." });
+    return;
+  }
+  let llm;
+  try {
+    llm = llmClientFromEnv();
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : "LLM is not configured." });
+    return;
+  }
+  try {
+    const { mechanicalCheck, judgeClaims, composeVerdict } = await import("./verify.js");
+    const mechanical = excerpt ? mechanicalCheck(claim, [excerpt]) : { matched: false, excerpt: null, reason: "No source text supplied" };
+    const judge = await judgeClaims(llm, [{ text: claim, sourceIds: ["s1"] }], [{ id: "s1", excerpt }]);
+    const j = judge?.get(0) ?? null;
+    const v = composeVerdict(mechanical, j ? j.supported : null, j?.reason);
+    res.json({ ok: true, verdict: v.verdict, excerpt: v.excerpt ?? excerpt, reason: v.reason, sourceUrl });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err instanceof Error ? err.message : "Verification failed." });
+  }
 });
 
 // Production: serve the built frontend (same pattern as prior LiveDocs).

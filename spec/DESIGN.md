@@ -35,9 +35,11 @@ in code; the LLM only writes wording and verdicts.
   { type: "plan", entities[] } → { type: "source", source } →
   { type: "progress", stage, detail } → { type: "report", report } |
   { type: "error", message, partial? }.
-- POST /api/verify { claim, sourceUrl } → { verdict, excerpt, reason }
+- POST /api/verify { claim, sourceUrl?, excerpt? } → { verdict, excerpt, reason }
   (also used inside the pipeline; exposed so a judge can re-check a
-  single claim).
+  single claim). The URL is a reference only: the check runs against
+  the supplied excerpt text (the fetch adapter was deleted in M-2, so
+  no page is fetched). Without an excerpt the verdict is needs-review.
 - All Meta calls use base https://api.meta.ai/v1, Bearer MODEL_API_KEY,
   model muse-spark-1.3. Synthesis requests cap max_tokens; every call
   logs model + input/output token counts server-side (no content logged).
@@ -98,6 +100,15 @@ in code; the LLM only writes wording and verdicts.
   remains the target state; this section records a temporary
   deviation, not a spec change. No interim-provider code ships in the
   submission without migration + full re-verification (M-3).
+- MIGRATION DONE 2026-10-27 (M-1/M-2): backend runs on Meta base +
+  muse-spark-1.3 + MODEL_API_KEY (goal hidden_files/.env, transient
+  local use; Doppler still empty); grounding is Meta Responses
+  web_search (backend/src/grounding.ts); the interim fetch adapter
+  (backend/src/fetching.ts) is DELETED, not a fallback; the UI
+  "Interim provider" note is replaced by a Meta provider label.
+  Verification (T-5) and archive/history (T-6) are built on Meta.
+  Remaining before T-7: adversarial QA pass + Pintu browser
+  confirmation (M-3 remainder, parent steps).
 - Interim key handling: FastRouter key 1 read from Doppler (muse/dev)
   at server start, transiently, never written to disk or printed.
   Note: this is a NEW use of that key (prior scopes: LiveDocs apps,

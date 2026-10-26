@@ -1,13 +1,21 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  buildMarkdown,
+  clearHistory,
+  loadHistory,
+  saveReport,
+  type ArchiveReport,
+} from "./archive";
 
 type Health = { ok: boolean; model: string; provider: string; llmConfigured: boolean; metaConfigured: boolean };
-type Source = { id: string; url: string; title: string; kind: string; excerpt: string | null };
+type Source = { id: string; url: string; title: string; kind: string; excerpt: string | null; grounded?: boolean };
 type Entity = { name: string; repo: string | null; url: string | null; stars: number | null; lastRelease: string | null; healthScore: number; healthSignals: string[] };
-type Claim = { text: string; sourceIds: string[] };
+type Claim = { text: string; sourceIds: string[]; verdict?: "verified" | "needs-review"; excerpt?: string | null; reason?: string };
 type Report = {
   id: string;
   query: string;
   method: "split" | "discovery" | "single";
+  createdAt?: string;
   entities: Entity[];
   sources: Source[];
   claims: Claim[];
@@ -20,6 +28,13 @@ export default function App() {
   const [query, setQuery] = useState("React Query vs SWR");
   const [trace, setTrace] = useState<string[]>([]);
   const [report, setReport] = useState<Report | null>(null);
+  const [history, setHistory] = useState<ArchiveReport[]>(() => {
+    try {
+      return loadHistory(localStorage);
+    } catch {
+      return [];
+    }
+  });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
@@ -73,7 +88,13 @@ export default function App() {
           } else if (event === "source") {
             setTrace((t) => [...t, `Source [${data["id"]}] ${data["title"]}`]);
           } else if (event === "report") {
-            setReport(data as unknown as Report);
+            const rep = data as unknown as Report;
+            setReport(rep);
+            try {
+              setHistory(saveReport(localStorage, rep as ArchiveReport));
+            } catch {
+              // history is a convenience, never fatal
+            }
           } else if (event === "error") {
             throw new Error(String(data["message"] ?? "Research failed."));
           }
@@ -88,16 +109,32 @@ export default function App() {
 
   const sourceById = new Map((report?.sources ?? []).map((s) => [s.id, s]));
 
+  function exportEvidence() {
+    if (!report) return;
+    const blob = new Blob([buildMarkdown(report as ArchiveReport)], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `livedocs-evidence-${report.id}.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   return (
     <main>
       <h1>LiveDocs Meta</h1>
       <p>
         Citation-verified research reports. Every claim cites a fetched
-        source — verification badges arrive in Slice 3.
+        source and carries a verification badge.
       </p>
 
       {health && !health.llmConfigured && (
         <p>Backend status: no LLM key configured — research is unavailable until a key is set.</p>
+      )}
+      {health && health.provider === "meta" && (
+        <p>
+          Powered by Meta Muse Spark ({health.model}) via the Meta Model API.
+        </p>
       )}
       {health && health.provider === "fastrouter" && (
         <p>
@@ -124,6 +161,31 @@ export default function App() {
       </form>
 
       {error && <p>Error: {error}</p>}
+
+      {history.length > 0 && (
+        <section>
+          <h2>History</h2>
+          <ul>
+            {history.map((h) => (
+              <li key={h.id}>
+                <button type="button" onClick={() => setReport(h as Report)}>
+                  {h.query}
+                </button>{" "}
+                · {h.sources.length} sources · {h.claims.length} claims
+              </li>
+            ))}
+          </ul>
+          <button
+            type="button"
+            onClick={() => {
+              clearHistory(localStorage);
+              setHistory([]);
+            }}
+          >
+            Clear history
+          </button>
+        </section>
+      )}
 
       {trace.length > 0 && (
         <section>
@@ -175,17 +237,18 @@ export default function App() {
           <h3>Verdict: {report.verdict.winner}</h3>
           <p>{report.verdict.text}</p>
           <p>
-            <em>
-              Verdict wording is the model's summary of the
-              code-computed ranking, not a separately verified claim —
-              claim-level verification arrives in Slice 3.
-            </em>
+            <button type="button" onClick={exportEvidence}>
+              Export evidence (Markdown)
+            </button>
           </p>
 
           <h3>Claims</h3>
           <ul>
             {report.claims.map((c, i) => (
               <li key={i}>
+                <strong>
+                  {c.verdict === "verified" ? "✓ Verified" : c.verdict === "needs-review" ? "Needs review" : "Unverified"}
+                </strong>{" "}
                 {c.text}{" "}
                 {c.sourceIds.map((id) => {
                   const s = sourceById.get(id);
@@ -197,6 +260,17 @@ export default function App() {
                     <span key={id}>[{id}]</span>
                   );
                 })}
+                {c.reason && (
+                  <p>
+                    <em>{c.reason}</em>
+                  </p>
+                )}
+                {c.excerpt && (
+                  <details>
+                    <summary>verifying excerpt</summary>
+                    <p>{c.excerpt.slice(0, 600)}</p>
+                  </details>
+                )}
               </li>
             ))}
           </ul>
@@ -209,6 +283,7 @@ export default function App() {
                 <a href={s.url} target="_blank" rel="noreferrer">
                   {s.title}
                 </a>
+                {s.grounded && <> [web-grounded]</>}
                 {s.excerpt && (
                   <details>
                     <summary>excerpt</summary>

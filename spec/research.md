@@ -119,3 +119,63 @@ Meta's own pages and Pintu's own records count as verified.
 - Exposure framing (SPEC NFR-4): build + demo + judging budgeted under
   $5 at Standard pricing, so worst case (credits never land) is a few
   dollars of API usage, not a $150 commitment.
+
+## T-1 probe 2026-10-27 ~00:20 IST (billing resolved, real key, transient)
+- Key: read in-process from the Meta goal hidden_files/.env (mode 600,
+  outside any repo) as MODEL_API_KEY. Value never printed, stored, or
+  committed. Probe file deleted after this run.
+- Billing: RESOLVED. Both calls HTTP 200, model muse-spark-1.3.
+  (Earlier 2026-10-26 probes failed billing_not_configured; the new
+  key + claimed credits cleared it.)
+
+### Responses API + web_search (grounding path, M-2 input)
+- Request: POST https://api.meta.ai/v1/responses
+  { model: "muse-spark-1.3",
+    input: "<one-sentence question>",
+    tools: [{ type: "web_search" }] }.
+- Response: OpenAI-style object. Top-level keys include id, object
+  ("response"), status, model, output[], usage, error.
+- output[] items, in order: { type: "reasoning" } (summary empty),
+  { type: "message", role: "assistant", content: [{ type:
+  "output_text", text }] } (intermediate reasoning chatter — IGNORE),
+  { type: "web_search_call", status, action } (one per search; the
+  model ran 7 searches for a one-sentence question), then a final
+  { type: "message" } whose output_text carries the answer.
+- Citations: url_citation annotations on the FINAL message's
+  output_text only: { type: "url_citation", url, start_index,
+  end_index, title }. Title is unreliable (one citation's title was
+  a raw npm-registry JSON blob) — use the URL as the citation
+  identity, title falls back to the URL's domain.
+- Verified example: "The latest stable release of TanStack Query is
+  v5.105.0." cited to https://registry.npmjs.org/@tanstack%2Fquery-core/latest
+  (real, current, grounded — not training data).
+- M-2 parse contract: collect url_citation annotations from ALL
+  message items' output_text (dedupe by URL), keep the final message
+  text as the grounding summary. Ignore reasoning items and
+  intermediate chatter.
+- COST WARNING: one grounding call used 54,181 total tokens
+  (input 52,187 incl. 24,364 cached; output 1,994 incl. 1,298
+  reasoning). At Standard pricing (~$1.25 in / $4.25 out per 1M)
+  that is ~$0.07–0.08 per entity grounding call. Two entities per
+  report ≈ $0.16 + synthesis ≈ $0.01. Fine against the $5 budget
+  for build + demo + judging, but do NOT ground more than one call
+  per entity and keep prompts to one sentence.
+
+### Chat Completions structured JSON (synthesis + judge path)
+- Request: POST https://api.meta.ai/v1/chat/completions
+  { model: "muse-spark-1.3", messages: [system, user],
+    response_format: { type: "json_object" }, temperature: 0.3,
+    max_tokens: 1500 }.
+- Response: OpenAI-style { id, choices: [{ message: { content },
+  finish_reason: "stop" }], model: "muse-spark-1.3", usage }.
+  response_format json_object IS honored: content parsed as valid
+  JSON with claims[] ({ text, sourceIds }) + verdict string.
+- REASONING-TOKEN LESSON: usage showed completion 1,049 tokens of
+  which 889 were reasoning_tokens — the model reasons before
+  writing, and reasoning consumes max_tokens. The earlier 5-token
+  probe returned content null for exactly this reason. Production
+  max_tokens must stay generous: synthesis 4,000 (existing),
+  judge batch 2,000 minimum. Never cap a Meta call below ~1,000.
+- Node fetch through this VM's egress proxy requires
+  NODE_USE_ENV_PROXY=1 (undici ignores proxy env otherwise).
+  Production (Render) needs no proxy env.
