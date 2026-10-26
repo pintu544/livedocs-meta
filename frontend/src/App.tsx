@@ -7,6 +7,7 @@ type Claim = { text: string; sourceIds: string[] };
 type Report = {
   id: string;
   query: string;
+  method: "split" | "discovery" | "single";
   entities: Entity[];
   sources: Source[];
   claims: Claim[];
@@ -142,6 +143,14 @@ export default function App() {
             Provider: {report.provider.name} / {report.provider.model} ·{" "}
             {report.sources.length} sources · {report.claims.length} claims
           </p>
+          {report.method === "discovery" && (
+            <p>
+              <strong>Note:</strong> contenders were suggested by the
+              model and repo matches are heuristic — check each repo
+              card before citing. The vs query path resolves exactly;
+              single-topic discovery can land on an adjacent repo.
+            </p>
+          )}
 
           <h3>Entities</h3>
           <ul>
@@ -165,6 +174,13 @@ export default function App() {
 
           <h3>Verdict: {report.verdict.winner}</h3>
           <p>{report.verdict.text}</p>
+          <p>
+            <em>
+              Verdict wording is the model's summary of the
+              code-computed ranking, not a separately verified claim —
+              claim-level verification arrives in Slice 3.
+            </em>
+          </p>
 
           <h3>Claims</h3>
           <ul>

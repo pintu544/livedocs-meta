@@ -30,6 +30,7 @@ export interface Claim {
 export interface Report {
   id: string;
   query: string;
+  method: "split" | "discovery" | "single";
   createdAt: string;
   entities: Entity[];
   sources: Source[];
@@ -203,6 +204,7 @@ export async function runResearch(query: string, llm: LLMClient, emit: Emit): Pr
   const report: Report = {
     id: randomUUID(),
     query,
+    method: plan.method,
     createdAt: new Date().toISOString(),
     entities,
     sources,

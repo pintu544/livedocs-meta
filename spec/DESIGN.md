@@ -103,3 +103,27 @@ in code; the LLM only writes wording and verdicts.
   Note: this is a NEW use of that key (prior scopes: LiveDocs apps,
   TasteRoute, VulnIntel fallback, HackerRank check) — Pintu's
   "different api key" go authorizes it; he can veto the choice.
+
+## Known limitation — entity resolution can pick an adjacent repo (QA S1–S4, 2026-10-26)
+- The vs path resolves correctly and stably (React Query →
+  TanStack/query, SWR → vercel/swr, verified across runs).
+- The single-topic discovery path can resolve a contender to an
+  adjacent repo: "TanStack Query" resolves to a Firebase adapter
+  because the top-10 GitHub search results for "TanStack Query" do
+  not contain TanStack/query at all (its name is just "query" and
+  its description contains neither word) — no scoring tweak can
+  recover a repo the search never returns. Likewise, an archived
+  true home (e.g. angular/angular.js) can lose to a live adjacent
+  repo (a styleguide literally named "angularjs-styleguide"),
+  because the live-wins rule has no margin comparison, and the
+  score threshold (15) is weak enough that tutorials, style
+  guides, and adapters qualify as "found".
+- The mismatch is VISIBLE (entity cards show the actual repo) and
+  every claim is still sourced to the shown repo — nothing is
+  fabricated — but a report can compare the wrong project. The
+  UI carries a discovery-path note saying exactly this.
+- Deliberately NOT fixed by further heuristic tuning (diminishing
+  returns; each tweak risked the vs path). Principled fix is M-2:
+  Meta Responses web_search grounding returns canonical project
+  pages, and entity resolution can use grounded URLs instead of
+  GitHub name guessing. Until M-2, the demo path is the vs query.

@@ -33,7 +33,7 @@ export class OpenAICompatibleLLM implements LLMClient {
     private baseUrl: string,
     private apiKey: string,
   ) {
-    if (!apiKey) throw new LLMError("LLM API key is required (LLM_API_KEY)");
+    if (!apiKey) throw new LLMError("LLM API key is required");
   }
 
   async completeJSON<T>(system: string, user: string, maxTokens = 4000): Promise<T> {
@@ -56,8 +56,10 @@ export class OpenAICompatibleLLM implements LLMClient {
       signal: AbortSignal.timeout(120_000),
     });
     if (!res.ok) {
-      const text = await res.text().catch(() => "");
-      throw new LLMError(`LLM request failed: HTTP ${res.status} ${text.slice(0, 200)}`, res.status);
+      // Generic message only. Provider error bodies are NEVER surfaced
+      // to the client or the logs: a provider that echoes a rejected
+      // key would leak it through the SSE trace otherwise (QA S5).
+      throw new LLMError(`LLM request failed: HTTP ${res.status}`, res.status);
     }
     const data = (await res.json()) as {
       choices?: Array<{ message?: { content?: string } }>;
@@ -82,6 +84,12 @@ export class OpenAICompatibleLLM implements LLMClient {
 export function llmClientFromEnv(env: NodeJS.ProcessEnv = process.env): LLMClient {
   const baseUrl = env["LLM_BASE_URL"] ?? "https://api.fastrouter.ai/api/v1";
   const model = env["LLM_MODEL"] ?? "openai/gpt-5.2";
-  const provider = baseUrl.includes("meta.ai") ? "meta" : "fastrouter";
-  return new OpenAICompatibleLLM(provider, model, baseUrl, env["LLM_API_KEY"] ?? "");
+  const isMeta = baseUrl.includes("meta.ai");
+  const provider = isMeta ? "meta" : "fastrouter";
+  // QA B1: M-1 puts the Meta key in MODEL_API_KEY, so a Meta base MUST
+  // read MODEL_API_KEY — reading LLM_API_KEY here would either die
+  // (unset) or send the FastRouter key to Meta (401). Strict: no fallback.
+  const key = isMeta ? env["MODEL_API_KEY"] ?? "" : env["LLM_API_KEY"] ?? "";
+  if (isMeta && !key) throw new LLMError("MODEL_API_KEY is required for a Meta base URL");
+  return new OpenAICompatibleLLM(provider, model, baseUrl, key);
 }
