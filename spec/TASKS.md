@@ -42,8 +42,12 @@ against the Nov 4, 21:00 ET / Nov 5, 07:30 IST deadline).
       DONE 2026-10-26 on the INTERIM provider: 12 claims, 0 with
       missing/invalid sources; deterministic ranking (adoption 50% +
       health 50%), LLM wording only. Repo commit 4348b20.
-- [ ] QA gate S2: adversarial QA subagent on Slice 2 + Pintu browser
+- [x] QA gate S2: adversarial QA subagent on Slice 2 + Pintu browser
       confirmation before Slice 3.
+      DONE 2026-10-26: QA verdict "not safe as-is" → fixes in 82e4dd4
+      (B1 MODEL_API_KEY routing, S5 generic errors, verdict + discovery
+      honesty labels, DESIGN.md disclosure) → Pintu confirmed Slice 2
+      closed 09:40 IST.
 
 ## Slice 3 — Verification + evidence archive (Nov 1–2)
 - [ ] T-5: Verify: mechanical quote-match + Muse Spark judge → badges
