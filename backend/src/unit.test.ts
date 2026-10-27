@@ -255,5 +255,51 @@ check("verifyClaims facts-verified claim has null excerpt (QA S3 m4)", async () 
   assert.equal(out[0].excerpt, null);
 });
 
+// QA S3 m4 residual: a facts match the judge REJECTS must also keep
+// a null excerpt — previously verifyClaims substituted excerpts[0],
+// so a rejected stars claim displayed an unrelated descriptive blurb
+// as its "verifying excerpt". Verdict stays needs-review; only the
+// misleading excerpt is gone.
+check("verifyClaims judge-rejected facts match keeps null excerpt (QA S3 m4 residual)", async () => {
+  const stub = {
+    provider: "test",
+    model: "test",
+    completeJSON: async () => ({ verdicts: [{ index: 0, supported: false, reason: "not stated" }] }),
+    ground: async () => {
+      throw new Error("unused");
+    },
+  };
+  const out = await verifyClaims(
+    stub as never,
+    [{ text: "TanStack/query has 50482 stars on GitHub", sourceIds: ["s1"] }],
+    [{ id: "s1", excerpt: "TanStack Query is a data fetching library for web applications" }],
+    "TanStack/query stars 50482 health 90",
+  );
+  assert.equal(out[0].verdict, "needs-review");
+  assert.equal(out[0].excerpt, null);
+});
+
+// Retained behavior: a claim with NO mechanical match left on
+// needs-review still shows the closest cited excerpt, so the reviewer
+// can see what was checked. Only facts matches lose the substitution.
+check("verifyClaims unmatched needs-review claim still shows closest excerpt", async () => {
+  const stub = {
+    provider: "test",
+    model: "test",
+    completeJSON: async () => ({ verdicts: [{ index: 0, supported: false, reason: "not stated" }] }),
+    ground: async () => {
+      throw new Error("unused");
+    },
+  };
+  const out = await verifyClaims(
+    stub as never,
+    [{ text: "React Query supports offline caching strategies", sourceIds: ["s1"] }],
+    [{ id: "s1", excerpt: "Something entirely unrelated about cooking" }],
+    "",
+  );
+  assert.equal(out[0].verdict, "needs-review");
+  assert.equal(out[0].excerpt, "Something entirely unrelated about cooking");
+});
+
 await Promise.all(pending);
 console.log(`\n${passed} unit checks passed`);

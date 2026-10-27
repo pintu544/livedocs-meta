@@ -253,9 +253,19 @@ export default function App() {
           <h3>Claims</h3>
           <ul>
             {report.claims.map((c, i) => {
-              // QA S3 M2: a grounded claim's "excerpt" is Meta's
-              // summary of the page, not a page quote — label it so.
-              const claimGrounded = c.sourceIds.some((id) => sourceById.get(id)?.grounded);
+              // QA S3 M2 + display fix: label the excerpt by the
+              // source it actually came from, not by any cited
+              // source. A claim excerpt is always verbatim from one
+              // cited source's excerpt (mechanical match or the
+              // needs-review fallback), so an exact match identifies
+              // its source; a mixed-source claim whose displayed
+              // excerpt is a GitHub excerpt must not be labeled a
+              // grounded summary just because another cited source
+              // is grounded.
+              const excerptSource = c.excerpt
+                ? c.sourceIds.map((id) => sourceById.get(id)).find((s) => s?.excerpt === c.excerpt)
+                : undefined;
+              const excerptGrounded = excerptSource?.grounded === true;
               return (
               <li key={i}>
                 <strong>
@@ -279,7 +289,7 @@ export default function App() {
                 )}
                 {c.excerpt && (
                   <details>
-                    <summary>{claimGrounded ? "verifying excerpt (grounded summary — not a page quote)" : "verifying excerpt"}</summary>
+                    <summary>{excerptGrounded ? "verifying excerpt (grounded summary — not a page quote)" : "verifying excerpt"}</summary>
                     <p>{c.excerpt.slice(0, 600)}</p>
                   </details>
                 )}

@@ -235,13 +235,15 @@ export async function verifyClaims(
     const mechanical = mechanicalCheck(c.text, excerpts, factsText);
     const j = judge?.get(i) ?? null;
     const v = composeVerdict(mechanical, j ? j.supported : null, j?.reason);
-    // Show the closest cited excerpt when a claim is left on
-    // needs-review, so the reviewer can see what was checked. Never
-    // substitute an excerpt for a verified claim whose evidence is
-    // repository data (QA S3 m4): a verified facts match has no
-    // single verifying excerpt, and displaying excerpts[0] would
-    // present unrelated text as evidence.
-    if (!v.excerpt && v.verdict !== "verified" && excerpts.length > 0) v.excerpt = excerpts[0];
+    // Show the closest cited excerpt when a claim with NO mechanical
+    // match is left on needs-review, so the reviewer can see what was
+    // checked. Never substitute for a facts match (QA S3 m4
+    // residual): a facts match has no single verifying excerpt, and
+    // displaying excerpts[0] — e.g. a descriptive blurb — as the
+    // excerpt of a judge-rejected stars claim presents unrelated text
+    // as evidence. Facts matches keep excerpt: null regardless of
+    // verdict.
+    if (!v.excerpt && v.verdict !== "verified" && !mechanical.matched && excerpts.length > 0) v.excerpt = excerpts[0];
     return v;
   });
 }

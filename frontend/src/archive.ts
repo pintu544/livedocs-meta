@@ -72,10 +72,15 @@ export function buildMarkdown(report: ArchiveReport): string {
   const byId = new Map(report.sources.map((s) => [s.id, s]));
   report.claims.forEach((c, i) => {
     const badge = c.verdict === "verified" ? "Verified" : c.verdict === "needs-review" ? "Needs review" : "Unverified";
-    const claimGrounded = c.sourceIds.some((id) => byId.get(id)?.grounded);
+    // Label the excerpt by the source it actually came from (see
+    // App.tsx): a mixed-source claim must not be labeled a grounded
+    // summary just because another cited source is grounded.
+    const excerptSource = c.excerpt
+      ? c.sourceIds.map((id) => byId.get(id)).find((s) => s?.excerpt === c.excerpt)
+      : undefined;
     lines.push(`${i + 1}. [${badge}] ${c.text}`);
     if (c.reason) lines.push(`   Reason: ${c.reason}`);
-    if (c.excerpt) lines.push(`   ${claimGrounded ? "Grounded summary (Meta's summary of the cited page, not a page quote)" : "Excerpt"}: ${c.excerpt.slice(0, 500)}`);
+    if (c.excerpt) lines.push(`   ${excerptSource?.grounded ? "Grounded summary (Meta's summary of the cited page, not a page quote)" : "Excerpt"}: ${c.excerpt.slice(0, 500)}`);
     for (const id of c.sourceIds) {
       const s = byId.get(id);
       if (s) lines.push(`   [${id}] ${s.title} — ${s.url}`);
